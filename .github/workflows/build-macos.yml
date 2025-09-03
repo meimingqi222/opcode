@@ -64,6 +64,7 @@ jobs:
         run: bun install
       
       - name: Import Apple certificates
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -89,7 +90,16 @@ jobs:
       - name: Build native
         env:
           CI: true
-        run: bun run tauri build
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.APPLE_CERTIFICATE }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+            echo "Building with code signing..."
+            bun run tauri build
+          else
+            echo "Building without code signing..."
+            bun run tauri build --no-bundle
+          fi
       
       - name: Upload architecture-specific artifacts
         uses: actions/upload-artifact@v4
@@ -144,6 +154,7 @@ jobs:
           ls -la artifacts/macos-x86_64/ || echo "macos-x86_64 directory not found"
       
       - name: Import Apple certificates
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -212,6 +223,7 @@ jobs:
           lipo -info dmg_temp/opcode.app/Contents/MacOS/opcode
       
       - name: Sign app bundle
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
@@ -230,6 +242,7 @@ jobs:
             -ov -format UDZO opcode.dmg
       
       - name: Sign DMG
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
@@ -238,6 +251,7 @@ jobs:
             --force opcode.dmg
       
       - name: Notarize DMG
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -255,9 +269,11 @@ jobs:
             --wait
       
       - name: Staple notarization
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         run: xcrun stapler staple opcode.dmg
       
       - name: Verify DMG
+        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
         run: |
           spctl -a -t open -vvv --context context:primary-signature opcode.dmg
           echo "✅ DMG verification complete"
