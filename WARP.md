@@ -176,6 +176,8 @@ where link.exe
 - `build-linux.yml` - Linux构建
 - `build-macos.yml` - macOS构建  
 - `build-windows.yml` - Windows构建
+- `build-windows-only.yml` - **Windows专用构建**（推荐）
+- `build-unsigned.yml` - 无签名多平台构建
 - 使用工作流复用避免重复
 
 ## 开发环境配置
@@ -270,10 +272,10 @@ cargo --version
 where cl
 
 # 检查 Windows SDK
-reg query "HKLM\SOFTWARE\Microsoft\Windows Kits\Installed Roots"
+reg query "HKLM\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots"
 
 # 检查 WebView2 安装
-reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+reg query "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 # 清理构建缓存
 cargo clean
@@ -283,4 +285,41 @@ rm -rf target/
 bun install
 bun run tauri build
 ```
+
+## Windows 专用构建工作流
+
+### 快速获取 Windows 版本（推荐）
+
+1. **访问 GitHub Actions**: https://github.com/your-repo/actions
+2. **选择 "Build Windows Only"**
+3. **点击 "Run workflow"**
+4. **配置构建参数**:
+   - **构建类型**: 
+     - `release` - 发布版本（推荐）
+     - `debug` - 调试版本
+   - **安装包类型**:
+     - `msi,nsis` - 生成 MSI + NSIS 安装包（推荐）
+     - `msi` - 仅生成 MSI 安装包
+     - `nsis` - 仅生成 NSIS 安装包
+     - `none` - 仅生成可执行文件
+5. **等待构建完成**（约10-15分钟）
+6. **下载构建产物**
+
+### 构建产物说明
+
+构建完成后你将获得：
+
+- 💻 `opcode.exe` - 独立可执行文件
+- 📦 `opcode_*.msi` - Windows MSI 安装包
+- 📦 `opcode_*_installer.exe` - NSIS 安装程序
+- 🔒 `checksums.txt` - SHA256 校验和
+
+### 自动触发构建
+
+每当修改以下文件时，会自动触发 Windows 构建：
+- `src/**` - 前端源代码
+- `src-tauri/**` - Rust 后端代码
+- `package.json` - 项目配置
+- `vite.config.ts` - 构建配置
+- `tsconfig.json` - TypeScript 配置
 

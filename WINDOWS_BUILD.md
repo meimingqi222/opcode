@@ -2,16 +2,18 @@
 
 ## 🚀 使用GitHub Actions自动构建
 
-### 方法1：手动触发Windows构建
+### 方法1：使用Windows专用构建（推荐）
 
 1. **访问GitHub仓库**
    - 打开 https://github.com/meimingqi222/opcode
    - 点击 `Actions` 标签页
 
-2. **选择Windows构建工作流**
-   - 在左侧找到 `Build Windows`
+2. **选择Windows专用构建工作流**
+   - 在左侧找到 `Build Windows Only`
    - 点击 `Run workflow` 按钮
-   - 选择 `main` 分支
+   - 配置构建参数：
+     - **构建类型**: 选择 `release`（推荐）或 `debug`
+     - **安装包类型**: 选择 `msi,nsis`（推荐）
    - 点击绿色的 `Run workflow` 按钮
 
 3. **等待构建完成**
@@ -20,8 +22,20 @@
 
 4. **下载构建产物**
    - 构建完成后，滚动到页面底部
-   - 在 `Artifacts` 部分找到 `windows-x86_64`
-   - 点击下载zip文件
+   - 在 `Artifacts` 部分找到 `opcode-windows-release-[run-number]`
+   - 点击下载 zip 文件
+
+#### 🛠️ 构建参数说明
+
+**构建类型**：
+- 🏆 `release` - 发布版本，优化编译，体积较小（推荐）
+- 🔧 `debug` - 调试版本，包含调试信息，编译更快
+
+**安装包类型**：
+- 📦 `msi,nsis` - 同时生成 MSI 和 NSIS 安装包（推荐）
+- 📦 `msi` - 仅生成 Windows MSI 安装包
+- 📦 `nsis` - 仅生成 NSIS 安装程序
+- 💻 `none` - 仅生成可执行文件，无安装包
 
 ### 方法2：推送到main分支触发构建
 

@@ -1,0 +1,280 @@
+name: Build Windows Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+      bundle_types:
+        description: '安装包类型'
+        required: true
+        default: 'msi,nsis'
+        type: choice
+        options:
+          - msi,nsis
+          - msi
+          - nsis
+          - none
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'package.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - '.github/workflows/build-windows-only.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-windows:
+    name: 🪟 Windows 构建
+    runs-on: windows-latest
+    
+    steps:
+      - name: 📂 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      
+      - name: 🦀 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      
+      - name: 📦 缓存 Rust 依赖
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows-rust-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            windows-rust-
+      
+      - name: 🥐 安装 Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      
+      - name: 📦 缓存 Bun 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun
+            node_modules
+          key: windows-bun-${{ hashFiles('bun.lockb', 'package.json') }}
+          restore-keys: |
+            windows-bun-
+      
+      - name: 📥 安装前端依赖
+        run: bun install --frozen-lockfile
+      
+      - name: 🏗️ 构建前端
+        run: bun run build
+      
+      - name: 🪟 构建 Windows 应用
+        shell: powershell
+        run: |
+          $buildType = "${{ inputs.build_type || 'release' }}"
+          $bundleTypes = "${{ inputs.bundle_types || 'msi,nsis' }}"
+          
+          Write-Host "🚀 开始构建 Windows 版本..."
+          Write-Host "📋 构建类型: $buildType"
+          Write-Host "📦 安装包类型: $bundleTypes"
+          
+          if ($buildType -eq "debug") {
+            if ($bundleTypes -eq "none") {
+              Write-Host "🔨 执行调试构建 (无安装包)..."
+              bun run tauri build --debug --no-bundle
+            } else {
+              Write-Host "🔨 执行调试构建..."
+              bun run tauri build --debug --bundles $bundleTypes
+            }
+          } else {
+            if ($bundleTypes -eq "none") {
+              Write-Host "🔨 执行发布构建 (无安装包)..."
+              bun run tauri build --no-bundle
+            } else {
+              Write-Host "🔨 执行发布构建..."
+              bun run tauri build --bundles $bundleTypes
+            }
+          }
+        env:
+          # 确保无签名构建
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+      
+      - name: 📁 整理构建产物
+        shell: powershell
+        run: |
+          $buildType = "${{ inputs.build_type || 'release' }}"
+          $bundleTypes = "${{ inputs.bundle_types || 'msi,nsis' }}"
+          
+          # 创建输出目录
+          New-Item -ItemType Directory -Force -Path "windows-build"
+          
+          # 确定构建目录
+          $buildDir = if ($buildType -eq "debug") { "debug" } else { "release" }
+          $basePath = "src-tauri\target\x86_64-pc-windows-msvc\$buildDir"
+          
+          Write-Host "📂 查找构建产物在: $basePath"
+          
+          # 复制可执行文件
+          $exePath = "$basePath\opcode.exe"
+          if (Test-Path $exePath) {
+            Copy-Item $exePath "windows-build\"
+            Write-Host "✅ 已复制可执行文件: opcode.exe"
+          } else {
+            Write-Host "⚠️ 未找到可执行文件: $exePath"
+          }
+          
+          # 复制安装包
+          if ($bundleTypes -ne "none") {
+            # MSI 安装包
+            if ($bundleTypes -match "msi") {
+              $msiPath = "$basePath\bundle\msi\*.msi"
+              if (Test-Path $msiPath) {
+                Copy-Item $msiPath "windows-build\"
+                Write-Host "✅ 已复制 MSI 安装包"
+                Get-ChildItem "$basePath\bundle\msi\" -Filter "*.msi" | ForEach-Object { 
+                  Write-Host "  📦 $($_.Name)"
+                }
+              } else {
+                Write-Host "⚠️ 未找到 MSI 安装包: $msiPath"
+              }
+            }
+            
+            # NSIS 安装包
+            if ($bundleTypes -match "nsis") {
+              $nsisPath = "$basePath\bundle\nsis\*.exe"
+              if (Test-Path $nsisPath) {
+                Copy-Item $nsisPath "windows-build\"
+                Write-Host "✅ 已复制 NSIS 安装包"
+                Get-ChildItem "$basePath\bundle\nsis\" -Filter "*.exe" | ForEach-Object { 
+                  Write-Host "  📦 $($_.Name)"
+                }
+              } else {
+                Write-Host "⚠️ 未找到 NSIS 安装包: $nsisPath"
+              }
+            }
+          }
+          
+          # 生成校验和
+          if ((Get-ChildItem "windows-build" | Measure-Object).Count -gt 0) {
+            Write-Host "🔐 生成校验和..."
+            Get-ChildItem "windows-build\*" -File | ForEach-Object {
+              $hash = Get-FileHash $_.FullName -Algorithm SHA256
+              "$($hash.Hash.ToLower())  $($_.Name)" | Out-File -Append -FilePath "windows-build\checksums.txt" -Encoding UTF8
+            }
+            Write-Host "✅ 校验和文件已生成"
+          }
+          
+          # 显示最终结果
+          Write-Host ""
+          Write-Host "📋 构建完成！产物列表:"
+          Get-ChildItem "windows-build" | ForEach-Object {
+            $size = if ($_.PSIsContainer) { "文件夹" } else { "{0:N2} MB" -f ($_.Length / 1MB) }
+            Write-Host "  📄 $($_.Name) - $size"
+          }
+      
+      - name: 📊 构建信息
+        shell: powershell
+        run: |
+          Write-Host "🏗️ 构建信息摘要"
+          Write-Host "==================="
+          Write-Host "🏷️ 构建类型: ${{ inputs.build_type || 'release' }}"
+          Write-Host "📦 安装包类型: ${{ inputs.bundle_types || 'msi,nsis' }}"
+          Write-Host "🖥️ 平台: Windows x64"
+          Write-Host "📅 构建时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')"
+          Write-Host "🔗 提交: ${{ github.sha }}"
+          Write-Host "🌿 分支: ${{ github.ref_name }}"
+          Write-Host ""
+          
+          # 检查文件大小
+          if (Test-Path "windows-build") {
+            $totalSize = (Get-ChildItem "windows-build" -File | Measure-Object Length -Sum).Sum
+            Write-Host "💾 总文件大小: {0:N2} MB" -f ($totalSize / 1MB)
+          }
+      
+      - name: 📤 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: opcode-windows-${{ inputs.build_type || 'release' }}-${{ github.run_number }}
+          path: windows-build/*
+          retention-days: 30
+          compression-level: 6
+      
+      - name: 🔍 上传构建日志 (失败时)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-windows-${{ github.run_number }}
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/*/build/*/output
+            src-tauri/target/x86_64-pc-windows-msvc/*/build/*/stderr
+          retention-days: 7
+      
+      - name: 📝 构建总结
+        if: always()
+        shell: powershell
+        run: |
+          if (${{ job.status }} -eq "success") {
+            Write-Host "🎉 Windows 构建成功完成！"
+            Write-Host ""
+            Write-Host "📥 下载方式:"
+            Write-Host "1. 进入 GitHub Actions 页面"
+            Write-Host "2. 找到当前工作流运行"
+            Write-Host "3. 在 'Artifacts' 部分下载 'opcode-windows-${{ inputs.build_type || 'release' }}-${{ github.run_number }}'"
+            Write-Host ""
+            Write-Host "📦 包含文件:"
+            Write-Host "• opcode.exe - 独立可执行文件"
+            if ("${{ inputs.bundle_types || 'msi,nsis' }}" -match "msi") {
+              Write-Host "• *.msi - Windows MSI 安装包"
+            }
+            if ("${{ inputs.bundle_types || 'msi,nsis' }}" -match "nsis") {
+              Write-Host "• *.exe - NSIS 安装程序"
+            }
+            Write-Host "• checksums.txt - SHA256 校验和"
+            Write-Host ""
+            Write-Host "⚡ 提示: 这是无签名版本，适用于开发和测试!"
+          } else {
+            Write-Host "❌ Windows 构建失败"
+            Write-Host "📋 请检查构建日志以了解详细错误信息"
+            Write-Host "🔧 常见问题排查:"
+            Write-Host "• 检查 Rust 工具链是否正确安装"
+            Write-Host "• 验证前端构建是否成功"
+            Write-Host "• 查看 Tauri 配置是否有效"
+          }
+
+  # 快速状态报告
+  status:
+    name: 📊 构建状态
+    runs-on: ubuntu-latest
+    needs: build-windows
+    if: always()
+    
+    steps:
+      - name: 📢 状态通知
+        run: |
+          if [[ "${{ needs.build-windows.result }}" == "success" ]]; then
+            echo "🎉 ✅ Windows 构建成功!"
+            echo "📦 可用下载: opcode-windows-${{ inputs.build_type || 'release' }}-${{ github.run_number }}"
+          elif [[ "${{ needs.build-windows.result }}" == "failure" ]]; then
+            echo "💥 ❌ Windows 构建失败"
+            echo "🔧 请检查构建日志获取详细信息"
+          elif [[ "${{ needs.build-windows.result }}" == "cancelled" ]]; then
+            echo "⏹️ ⚠️ Windows 构建被取消"
+          else
+            echo "❓ Windows 构建状态未知: ${{ needs.build-windows.result }}"
+          fi
+          
+          echo ""
+          echo "🔗 工作流运行: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
